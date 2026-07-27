@@ -32,16 +32,24 @@ ENV ROS_DISTRO=${ROS_DISTRO}
 
 RUN pip install uv poetry
 
+ARG CRAM_REVISION=e8d906b665d158318df2917df21bf3ee8841c78b
+ENV CRAM_REPOSITORY=/home/jovyan/libs/cognitive_robot_abstract_machine
+ENV NLP_DEMO_DIR=${CRAM_REPOSITORY}/pycram/demos/thesis_demo
+ENV PYTHONPATH=${CRAM_REPOSITORY}/pycram/demos
+
 RUN set -ex && \
     poetry config virtualenvs.create false && \
     git config --global http.postBuffer 524288000 && \
     git config --global http.version HTTP/1.1 && \
-    mkdir -p ${HOME}/libs && cd ${HOME}/libs && \
+    mkdir -p /home/jovyan/libs && \
+    git init ${CRAM_REPOSITORY} && \
+    cd ${CRAM_REPOSITORY} && \
+    git remote add origin https://github.com/wittjan/cognitive_robot_abstract_machine.git && \
     for i in 1 2 3; do \
-      git clone --depth 1 --branch BA-Thesis --single-branch https://github.com/wittjan/cognitive_robot_abstract_machine.git && break || \
-      (echo "clone failed (attempt $i), retrying..." && rm -rf cognitive_robot_abstract_machine && sleep 10); \
+      git fetch --depth 1 origin ${CRAM_REVISION} && break || \
+      (echo "fetch failed (attempt $i), retrying..." && sleep 10); \
     done && \
-    cd cognitive_robot_abstract_machine && \
+    git checkout --detach FETCH_HEAD && \
     sed -i '/^[[:space:]]*random_events[[:space:]]*=.*$/d' pyproject.toml && \
     poetry install && \
     git checkout -- pyproject.toml && \
@@ -85,28 +93,35 @@ RUN UV_CONCURRENT_BUILDS=1 UV_CONCURRENT_DOWNLOADS=8 \
     uv pip install --system --torch-backend ${CUDA_INDEX} -r /tmp/requirements.txt
 
 RUN pip install --no-deps --force-reinstall \
-    ${HOME}/libs/cognitive_robot_abstract_machine/random_events
+    ${CRAM_REPOSITORY}/random_events
 
 ENV HF_HOME=/root/.cache/huggingface
 ENV HF_HUB_DISABLE_PROGRESS_BARS=0
 ENV HF_XET_HIGH_PERFORMANCE=1
 RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('small')"
-ARG HF_TOKEN
 ARG PLANNER_GGUF_MODEL=wijan/Robot-Action-Planner-GGUF
 ENV PLANNER_GGUF_MODEL=${PLANNER_GGUF_MODEL}
+ARG PLANNER_GGUF_REVISION=e3ffdd293a59bda6fa13756ab2cc47ee7eb9e90b
+ENV PLANNER_GGUF_REVISION=${PLANNER_GGUF_REVISION}
+ENV PLANNER_GGUF_DIR=/opt/planner-model
+ENV PLANNER_GGUF_FILE=/opt/planner-model/meta-llama-3.1-8b-instruct.Q4_K_M.gguf
 ARG PLANNER_MODEL=wijan/Robot-Action-Planner
 ENV PLANNER_MODEL=${PLANNER_MODEL}
 RUN python3 -c "\
-from huggingface_hub import snapshot_download; \
-import os; \
-snapshot_download(os.environ['PLANNER_GGUF_MODEL'], token=os.environ.get('HF_TOKEN') or None)"
+	from huggingface_hub import snapshot_download; \
+	import os; \
+	snapshot_download( \
+	    os.environ['PLANNER_GGUF_MODEL'], \
+	    revision=os.environ['PLANNER_GGUF_REVISION'], \
+	    local_dir=os.environ['PLANNER_GGUF_DIR'], \
+	    allow_patterns=[os.path.basename(os.environ['PLANNER_GGUF_FILE'])])"
 
 # Optionally also bake the merged (non-GGUF) model so PLANNER_USE_GGUF=0 stays fast.
 ARG BAKE_MERGED=0
 RUN if [ "${BAKE_MERGED}" = "1" ]; then python3 -c "\
-from huggingface_hub import snapshot_download; \
-import os; \
-snapshot_download(os.environ['PLANNER_MODEL'], token=os.environ.get('HF_TOKEN') or None)"; fi
+	from huggingface_hub import snapshot_download; \
+	import os; \
+	snapshot_download(os.environ['PLANNER_MODEL'])"; fi
 
 USER root
 ENV REPO_DIR=/home/repo
@@ -131,8 +146,6 @@ RUN cd ${REPO_DIR}/binder/desktop-widget && \
     npm run build && \
     jupyter labextension install . --no-build && \
     jupyter lab build --minimize=False
-
-ENV PYTHONPATH=/home/jovyan/libs/cognitive_robot_abstract_machine/pycram/demos:${PYTHONPATH}
 
 COPY binder/entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]

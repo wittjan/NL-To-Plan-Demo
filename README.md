@@ -1,6 +1,6 @@
 # Natural-Language Robot-Action-Planner Demo
 
-[![Binder](https://binder.intel4coro.de/badge_logo.svg)](https://binder.intel4coro.de/v2/gh/wittjan/NL-To-Plan-Demo/HEAD)
+[![Binder](https://binder.intel4coro.de/badge_logo.svg)](https://binder.intel4coro.de/v2/gh/wittjan/NL-To-Plan-Demo/HEAD?urlpath=lab/workspaces/new-workspace)
 
 This repository provides the browser interface and reproducible runtime for a natural-language robot-action-planning demo. A user selects a robot and a simulated world, records a household command, and watches the robot executing the task.
 
