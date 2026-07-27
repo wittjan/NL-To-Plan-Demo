@@ -32,7 +32,7 @@ ENV ROS_DISTRO=${ROS_DISTRO}
 
 RUN pip install uv poetry
 
-ARG CRAM_REVISION=e8d906b665d158318df2917df21bf3ee8841c78b
+ARG CRAM_REVISION=9417c78b25cc55d4241812a64ef00c1f095db341
 ENV CRAM_REPOSITORY=/home/jovyan/libs/cognitive_robot_abstract_machine
 ENV NLP_DEMO_DIR=${CRAM_REPOSITORY}/pycram/demos/thesis_demo
 ENV PYTHONPATH=${CRAM_REPOSITORY}/pycram/demos
@@ -107,21 +107,11 @@ ENV PLANNER_GGUF_DIR=/opt/planner-model
 ENV PLANNER_GGUF_FILE=/opt/planner-model/meta-llama-3.1-8b-instruct.Q4_K_M.gguf
 ARG PLANNER_MODEL=wijan/Robot-Action-Planner
 ENV PLANNER_MODEL=${PLANNER_MODEL}
-RUN python3 -c "\
-	from huggingface_hub import snapshot_download; \
-	import os; \
-	snapshot_download( \
-	    os.environ['PLANNER_GGUF_MODEL'], \
-	    revision=os.environ['PLANNER_GGUF_REVISION'], \
-	    local_dir=os.environ['PLANNER_GGUF_DIR'], \
-	    allow_patterns=[os.path.basename(os.environ['PLANNER_GGUF_FILE'])])"
+RUN python3 -c "import os; from huggingface_hub import snapshot_download; snapshot_download(os.environ['PLANNER_GGUF_MODEL'], revision=os.environ['PLANNER_GGUF_REVISION'], local_dir=os.environ['PLANNER_GGUF_DIR'], allow_patterns=[os.path.basename(os.environ['PLANNER_GGUF_FILE'])])"
 
 # Optionally also bake the merged (non-GGUF) model so PLANNER_USE_GGUF=0 stays fast.
 ARG BAKE_MERGED=0
-RUN if [ "${BAKE_MERGED}" = "1" ]; then python3 -c "\
-	from huggingface_hub import snapshot_download; \
-	import os; \
-	snapshot_download(os.environ['PLANNER_MODEL'])"; fi
+RUN if [ "${BAKE_MERGED}" = "1" ]; then python3 -c "import os; from huggingface_hub import snapshot_download; snapshot_download(os.environ['PLANNER_MODEL'])"; fi
 
 USER root
 ENV REPO_DIR=/home/repo
