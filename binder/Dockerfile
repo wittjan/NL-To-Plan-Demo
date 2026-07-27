@@ -32,7 +32,7 @@ ENV ROS_DISTRO=${ROS_DISTRO}
 
 RUN pip install uv poetry
 
-ARG CRAM_REVISION=9417c78b25cc55d4241812a64ef00c1f095db341
+ARG CRAM_REVISION=1a158f47e65dc3cf4ed8fcaa65cd68c0321b4cf7
 ENV CRAM_REPOSITORY=/home/jovyan/libs/cognitive_robot_abstract_machine
 ENV NLP_DEMO_DIR=${CRAM_REPOSITORY}/pycram/demos/thesis_demo
 ENV PYTHONPATH=${CRAM_REPOSITORY}/pycram/demos
