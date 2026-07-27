@@ -1,34 +1,79 @@
-version: '3'
+# Usage:
+#   docker compose --profile nvidia up --build    # NVIDIA GPU
+#   docker compose --profile cpu up --build       # CPU-only
+#   ./run.sh                                      # Auto-detect and pick the profile
+
+x-common: &common
+  stdin_open: true
+  tty: true
+  user: root
+  working_dir: /home/repo
+  command: >
+    jupyter lab
+    --allow-root
+    --NotebookApp.token=''
+    --no-browser
+    --ip=0.0.0.0
+  shm_size: "2gb"
+  ports:
+    - "8888:8888"
+  volumes:
+    - ../:/home/repo:rw
+    - ${CRAM_REPOSITORY:-../../cognitive_robot_abstract_machine}:/home/jovyan/libs/cognitive_robot_abstract_machine:rw
+    - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+
+x-env: &env
+  AUTO_START_RVIZ: "1"
+  AUTO_OPEN_DESKTOP: "0"
+  AUTO_OPEN_DESKTOP_ANCHOR: split-right
+  RVIZ_DISPLAY: ":1"
+  RVIZ_CONFIG_FILE: /home/jovyan/.rviz2/default.rviz
+  LIBGL_ALWAYS_SOFTWARE: "1"
+  QT_X11_NO_MITSHM: "1"
+  PYTHONWARNINGS: ${PYTHONWARNINGS:-ignore:invalid escape sequence:SyntaxWarning}
+  PLANNER_USE_GGUF: ${PLANNER_USE_GGUF:-1}
+  PLANNER_GGUF_FILE: ${PLANNER_GGUF_FILE:-meta-llama-3.1-8b-instruct.Q4_K_M.gguf}
+
 services:
-  binder-template:
-    image: binder-template:main
+  binder-nvidia:
+    <<: *common
+    profiles:
+      - nvidia
+    image: binder:nvidia
+    runtime: nvidia
     build:
       context: ../
       dockerfile: ./binder/Dockerfile
-    stdin_open: true
-    tty: true
-    user: root
-    working_dir: /home/repo
-    command: jupyter lab --allow-root --NotebookApp.token='' --no-browser --ip=0.0.0.0
-    ports:
-      - 8888:8888
-    volumes:
-      - ../:/home/repo:rw
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw  # X11 socket for GUI apps
+      args:
+        CUDA_INDEX: ${CUDA_INDEX:-cu126}
+        HF_TOKEN: ${HF_TOKEN:-}
+        PLANNER_MODEL: ${PLANNER_MODEL:-wijan/Robot-Action-Planner}
+        PLANNER_GGUF_MODEL: ${PLANNER_GGUF_MODEL:-wijan/Robot-Action-Planner-GGUF}
     environment:
-      - AUTO_START_RVIZ=1
-      - AUTO_OPEN_DESKTOP=0
-      - AUTO_OPEN_DESKTOP_ANCHOR=split-right
-      - RVIZ_DISPLAY=:1
-      - RVIZ_CONFIG_FILE=/home/jovyan/.rviz2/default.rviz
-      - LIBGL_ALWAYS_SOFTWARE=1
-      - QT_X11_NO_MITSHM=1
-      - DISPLAY=${DISPLAY}  # Use host display for GUI apps
-      - NVIDIA_DRIVER_CAPABILITIES=all
+      <<: *env
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [gpu]
+              capabilities:
+                - gpu
+
+  binder-cpu:
+    <<: *common
+    profiles:
+      - cpu
+    image: binder:cpu
+    build:
+      context: ../
+      dockerfile: ./binder/Dockerfile
+      args:
+        CUDA_INDEX: cpu
+        HF_TOKEN: ${HF_TOKEN:-}
+        PLANNER_MODEL: ${PLANNER_MODEL:-wijan/Robot-Action-Planner}
+        PLANNER_GGUF_MODEL: ${PLANNER_GGUF_MODEL:-wijan/Robot-Action-Planner-GGUF}
+    environment:
+      <<: *env

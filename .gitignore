@@ -157,4 +157,31 @@ cython_debug/
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+.idea/
+
+# OS
+.DS_Store
+
+node_modules/
+.pnp.*
+binder/desktop-widget/.yarn/*
+!binder/desktop-widget/.yarn/patches
+!binder/desktop-widget/.yarn/releases
+!binder/desktop-widget/.yarn/plugins
+binder/desktop-widget/.yarn/cache
+binder/desktop-widget/.yarn/install-state.gz
+
+run/
+demo/run/
+/tmp/nlp_*.json
+
+# models
+*.gguf
+models/
+adapter/
+merged/
+
+# Local colcon build artifacts
+binder/ros_ws/build/
+binder/ros_ws/install/
+binder/ros_ws/log/

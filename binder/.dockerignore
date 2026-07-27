@@ -1,0 +1,21 @@
+# Keep the build context small and out of the image (COPY . copies into /home/repo).
+.git
+.gitignore
+
+# Archives and editor/IDE cruft
+*.zip
+.idea/
+.vscode/
+
+# Python / Jupyter cruft
+**/__pycache__/
+**/*.pyc
+**/.ipynb_checkpoints/
+
+# Node build artifacts (rebuilt in the image)
+**/node_modules/
+
+# Local colcon build artifacts (rebuilt in the image)
+binder/ros_ws/build/
+binder/ros_ws/install/
+binder/ros_ws/log/

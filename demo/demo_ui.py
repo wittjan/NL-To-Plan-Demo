@@ -1,50 +1,34 @@
-import logging
-import os
+"""NLP-binder UI: robot/env selectors. Talks to the Flask server. Recorder card lives in recorder_ui.py."""
+
+import json
 import shutil
-import signal
 import subprocess
 import threading
-import warnings
+import time
+import urllib.request
 
-logging.disable(logging.CRITICAL)
-os.environ.setdefault("PYTHONWARNINGS", "ignore")
 from base64 import b64encode
-from json import dumps as json_dumps
 from pathlib import Path
 
 import ipywidgets as widgets
-from IPython.display import HTML, Markdown, display
-import sys
+from IPython.display import HTML, display
+from recorder_ui import RECORDER_HTML
+from src.world.session import AVAILABLE_ENVIRONMENTS, AVAILABLE_ROBOTS
 
-import numpy as np
-
-logging.getLogger("solvers").setLevel(logging.ERROR)
-logging.getLogger("polytope").setLevel(logging.ERROR)
-warnings.filterwarnings("ignore", message=r".*cvxopt\.glpk.*")
-warnings.filterwarnings("ignore", message=r".*scipy\.optimize\.linprog.*")
-
-
-ROBOTS = ("pr2", "hsrb", "stretch", "tiago", "g1", "justin")
-ACTIONS = ("cut", "mix", "wipe")
-ENVIRONMENTS = ("apartment", "kitchen", "isr")
-ACTION_DEFAULT_OBJECT_KIND = {
-    "cut": "bread",
-    "mix": "bowl",
-    "wipe": "wipe",
-}
 VIDEO_FILES = (
     ("PR2 Real", "assets/cuttin_real_pr2.mp4"),
     ("G1 Simulation", "assets/g1_simu.mp4"),
     ("Multiple Robots", "assets/all_robots.mp4"),
 )
+
 FAQ_ITEMS = (
     (
         "How do I start the demo?",
-        "Choose a robot, action, and environment, then click Start Demo.",
+        "Choose a robot and environment, then click the Record button and speak.",
     ),
     (
         "Why do I see multiple items?",
-        "When multiple items appear, select a different environment to reset the publisher."
+        "When multiple items appear, select a different environment to reset the publisher.",
     ),
     (
         "Why does the demo take a moment to appear?",
@@ -52,34 +36,28 @@ FAQ_ITEMS = (
     ),
     (
         "Why is the camera wrong?",
-        "The camera is attached to a link, so you may need to adjust it slightly yourself. When you choose a different environment, it will jump again.",
+        "The camera is attached to a link, so you may need to adjust it slightly yourself. "
+        "When you choose a different environment, it will jump again.",
     ),
 )
 
-
-def _default_object_kind_for_action(action):
-    return ACTION_DEFAULT_OBJECT_KIND.get(action, "bread")
-
-
-CURRENT_DEMO_SELECTION = {}
 BACKGROUND_IMAGE_PATH = (
     Path(__file__).resolve().parent.parent.joinpath("img", "aicor-background.png")
 )
-LOGO_IMAGE_PATH = Path(__file__).resolve().parent.parent.joinpath("img", "aicor-logo.png")
-RVIZ_CONFIG_DIRECTORY = Path(__file__).resolve().parent / "rviz"
-ACTIVE_RVIZ_CONFIG_PATH = Path("/home/jovyan/.rviz2/default.rviz")
-SHARED_RVIZ_CONFIG_PATH = RVIZ_CONFIG_DIRECTORY / "shared.rviz"
-DEMO_MODULE_SEARCH_PATHS = (
-    Path("/home/jovyan/libs/cognitive_robot_abstract_machine/pycram/demos"),
-    Path(__file__).resolve().parents[2]
-    / "cognitive_robot_abstract_machine"
-    / "pycram"
-    / "demos",
+LOGO_IMAGE_PATH = (
+    Path(__file__).resolve().parent.parent.joinpath("img", "aicor-logo.png")
 )
 
-for demo_path in DEMO_MODULE_SEARCH_PATHS:
-    if demo_path.is_dir() and str(demo_path) not in sys.path:
-        sys.path.insert(0, str(demo_path))
+# ---------------------------------------------------------------------------
+# RViz config switching
+# ---------------------------------------------------------------------------
+
+RVIZ_CONFIG_DIRECTORY = Path(__file__).resolve().parent / "rviz"
+ACTIVE_RVIZ_CONFIG_PATH = Path("/home/jovyan/.rviz2/default.rviz")
+_RVIZ_CONFIGS = {
+    "apartment": RVIZ_CONFIG_DIRECTORY / "apartment.rviz",
+    "kitchen": RVIZ_CONFIG_DIRECTORY / "kitchen.rviz",
+}
 
 
 def _rviz_pids():
@@ -93,58 +71,24 @@ def _is_rviz_running():
     return bool(_rviz_pids())
 
 
-def _rviz_config_matches(config_path):
-    if not ACTIVE_RVIZ_CONFIG_PATH.is_file():
-        return False
-    return ACTIVE_RVIZ_CONFIG_PATH.read_bytes() == config_path.read_bytes()
-
-
 def _reload_rviz_for_environment(environment):
-    if not SHARED_RVIZ_CONFIG_PATH.is_file():
+    config_path = _RVIZ_CONFIGS.get(environment)
+    if config_path is None or not config_path.is_file():
         raise FileNotFoundError(
-            f"Shared RViz config not found: {SHARED_RVIZ_CONFIG_PATH}"
+            f"RViz config not found for environment {environment!r}: {config_path}"
         )
 
     ACTIVE_RVIZ_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    config_matches = _rviz_config_matches(SHARED_RVIZ_CONFIG_PATH)
-    if not config_matches:
-        shutil.copyfile(SHARED_RVIZ_CONFIG_PATH, ACTIVE_RVIZ_CONFIG_PATH)
+    shutil.copyfile(config_path, ACTIVE_RVIZ_CONFIG_PATH)
 
     if _is_rviz_running():
-        return "preserved"
+        subprocess.run(["pkill", "-f", "rviz2"], check=False)
+        return "restarted"
     return "seeded"
 
 
 def _style_label(value):
     return value.replace("_", " ").title()
-
-
-def _demo_pythonpath():
-    paths = [str(path) for path in DEMO_MODULE_SEARCH_PATHS if path.is_dir()]
-    current_pythonpath = os.environ.get("PYTHONPATH", "")
-    if current_pythonpath:
-        paths.append(current_pythonpath)
-    return os.pathsep.join(paths)
-
-
-def _build_demo_subprocess_command():
-    return [
-        sys.executable,
-        "-u",
-        "-c",
-        (
-            "import json, logging, os, warnings; "
-            "logging.disable(logging.CRITICAL); "
-            "warnings.filterwarnings('ignore'); "
-            "from thesis_single_object import run_single_object_demo; "
-            "selection = json.loads(os.environ['DEMO_UI_SELECTION']); "
-            "run_single_object_demo("
-            "action=selection['action'], "
-            "robot_name=selection['robot'], "
-            "environment_name=selection['environment'], "
-            "object_kind=selection['object_kind'])"
-        ),
-    ]
 
 
 def _inject_styles():
@@ -311,49 +255,9 @@ def _inject_styles():
                 box-shadow: 0 10px 20px rgba(47, 111, 163, 0.22);
                 transform: translateY(-1px);
             }
-            .demo-start .widget-button {
-                display: inline-flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                width: auto;
-                min-width: 220px;
-                border: 0;
-                border-radius: 14px;
-                padding: 12px 18px;
-                background: linear-gradient(135deg, #c8574f 0%, #dd7463 100%);
-                color: white;
-                font-weight: 700;
-                letter-spacing: 0.01em;
-                text-align: center !important;
-                line-height: 1.2 !important;
-                box-shadow: 0 12px 22px rgba(200, 87, 79, 0.24);
-            }
             .demo-summary {
                 display: grid;
                 gap: 10px;
-            }
-            .demo-badge-grid {
-                display: grid;
-                gap: 10px;
-            }
-            .demo-badge {
-                display: grid;
-                gap: 4px;
-                padding: 12px 14px;
-                border-radius: 14px;
-                background: var(--demo-surface);
-                border: 1px solid var(--demo-line);
-            }
-            .demo-badge-label {
-                color: var(--demo-muted);
-                font-size: 11px;
-                font-weight: 700;
-                letter-spacing: 0.08em;
-                text-transform: uppercase;
-            }
-            .demo-badge-value {
-                font-size: 18px;
-                font-weight: 700;
             }
             .demo-note {
                 padding: 12px 14px;
@@ -461,8 +365,7 @@ def _logo_header():
         return None
 
     logo_data = b64encode(LOGO_IMAGE_PATH.read_bytes()).decode("ascii")
-    return widgets.HTML(
-        value=f"""
+    return widgets.HTML(value=f"""
         <div class="demo-logo-wrap">
           <img
             class="demo-logo"
@@ -470,33 +373,12 @@ def _logo_header():
             alt="AICOR"
           />
         </div>
-        """
-    )
+        """)
 
 
-def _selection_summary(selection):
-    return f"""
-    <div class="demo-summary">
-      <div class="demo-badge-grid">
-        <div class="demo-badge">
-          <div class="demo-badge-label">Robot</div>
-          <div class="demo-badge-value">{_style_label(selection['robot'])}</div>
-        </div>
-        <div class="demo-badge">
-          <div class="demo-badge-label">Action</div>
-          <div class="demo-badge-value">{_style_label(selection['action'])}</div>
-        </div>
-        <div class="demo-badge">
-          <div class="demo-badge-label">Environment</div>
-          <div class="demo-badge-value">{_style_label(selection['environment'])}</div>
-        </div>
-      </div>
-      <div class="demo-note">
-        This notebook is the single launch entrypoint. Change the stack here instead of
-        relying on Binder URL params.
-      </div>
-    </div>
-    """
+# ---------------------------------------------------------------------------
+# FAQ + video sections (kept from template)
+# ---------------------------------------------------------------------------
 
 
 def _available_videos():
@@ -588,181 +470,74 @@ def _faq_section():
     return wrapper
 
 
-def run_info_ui():
-    _inject_styles()
-    children = [_faq_section()]
-    container = widgets.VBox(children, layout=widgets.Layout(width="100%"))
-    container.add_class("demo-shell")
-    container.add_class("demo-stack")
-    display(container)
+# ---------------------------------------------------------------------------
+# NLP planner UI: robot/env + record button
+# ---------------------------------------------------------------------------
 
 
-def run_ui(on_start=None):
-    global CURRENT_DEMO_SELECTION
+def _select_on_server(selection):
+    payload = json.dumps(selection).encode()
 
+    def _post():
+        for _ in range(20):
+            try:
+                resp = urllib.request.urlopen(
+                    urllib.request.Request(
+                        "http://localhost:5000/select",
+                        data=payload,
+                        headers={"Content-Type": "application/json"},
+                    )
+                )
+                if resp.status == 200:
+                    return
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+    threading.Thread(target=_post, daemon=True).start()
+
+
+def run_ui():
+    """Render the robot, environment, and recorder controls."""
     _inject_styles()
 
     selection = {
-        "robot": ROBOTS[-1],
-        "action": ACTIONS[0],
-        "environment": ENVIRONMENTS[0],
-        "object_kind": _default_object_kind_for_action(ACTIONS[0]),
+        "robot": "hsrb",
+        "environment": AVAILABLE_ENVIRONMENTS[0],
     }
-    CURRENT_DEMO_SELECTION = selection.copy()
+
+    # --- selectors ---
 
     robot = widgets.ToggleButtons(
-        options=[(_style_label(value), value) for value in ROBOTS],
+        options=[(_style_label(value), value) for value in AVAILABLE_ROBOTS],
         value=selection["robot"],
         description="Robot",
     )
 
-    action = widgets.ToggleButtons(
-        options=[(_style_label(value), value) for value in ACTIONS],
-        value=selection["action"],
-        description="Action",
-    )
-
     environment = widgets.ToggleButtons(
-        options=[(_style_label(value), value) for value in ENVIRONMENTS],
+        options=[(_style_label(value), value) for value in AVAILABLE_ENVIRONMENTS],
         value=selection["environment"],
         description="Env",
     )
 
-    summary = widgets.HTML(value=_selection_summary(selection))
-    start_button = widgets.Button(description="Start Demo", icon="play")
-    stop_button = widgets.Button(
-        description="Stop Demo",
-        icon="stop",
-        disabled=True,
-        button_style="warning",
-    )
-    running_notice = widgets.HTML(value="")
-    output = widgets.Output()
-    active_process = {"proc": None}
+    def _update_selection(change):
+        key = "robot" if change["owner"].description == "Robot" else "environment"
+        selection[key] = change["new"]
+        _select_on_server(selection)
+        if key == "environment":
+            _reload_rviz_for_environment(change["new"])
 
-    start_box = widgets.Box([start_button, stop_button])
-    start_box.add_class("demo-start")
+    robot.observe(_update_selection, names="value")
+    environment.observe(_update_selection, names="value")
 
-    controls = widgets.VBox(
-        [
-            robot,
-            action,
-            environment,
-            start_box,
-            running_notice,
-            output,
-        ]
-    )
+    _select_on_server(selection)
+
+    # --- layout ---
+
+    controls = widgets.VBox([robot, environment])
     controls.add_class("demo-card")
     controls.add_class("demo-ui")
     controls.add_class("demo-controls")
-
-    CONTROL_KEYS = {
-        "Robot": "robot",
-        "Action": "action",
-        "Env": "environment",
-        "Environment": "environment",
-    }
-
-    def _update_selection(change):
-        global CURRENT_DEMO_SELECTION
-        key = CONTROL_KEYS[change["owner"].description]
-        selection[key] = change["new"]
-        if key == "action":
-            selection["object_kind"] = _default_object_kind_for_action(
-                selection["action"]
-            )
-        CURRENT_DEMO_SELECTION = selection.copy()
-        summary.value = _selection_summary(selection)
-
-    robot.observe(_update_selection, names="value")
-    action.observe(_update_selection, names="value")
-    environment.observe(_update_selection, names="value")
-
-    def _default_start(current_selection):
-        with output:
-            output.clear_output(wait=True)
-
-        _reload_rviz_for_environment(current_selection["environment"])
-        env = os.environ.copy()
-        env["PYTHONPATH"] = _demo_pythonpath()
-        env["DEMO_UI_SELECTION"] = json_dumps(current_selection)
-        env["PYTHONWARNINGS"] = "ignore"
-        return subprocess.Popen(
-            _build_demo_subprocess_command(),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=env,
-            start_new_session=True,
-        )
-
-    def _set_running_state(is_running, message=""):
-        start_button.disabled = is_running
-        stop_button.disabled = not is_running
-        robot.disabled = is_running
-        action.disabled = is_running
-        environment.disabled = is_running
-        running_notice.value = message
-
-    def _cleanup_process(proc, *, was_stopped=None):
-        if active_process["proc"] is not proc:
-            return
-        return_code = proc.wait()
-        active_process["proc"] = None
-        if was_stopped is None:
-            was_stopped = return_code in (-signal.SIGTERM, -signal.SIGKILL)
-        if was_stopped:
-            message = '<div class="demo-running-note">Demo stopped.</div>'
-        elif return_code == 0:
-            message = ""
-        else:
-            message = (
-                '<div class="demo-running-note">'
-                f"Demo exited with code {return_code}."
-                "</div>"
-            )
-        _set_running_state(False, message)
-
-    def _stream_demo_output(proc):
-        try:
-            if proc.stdout is not None:
-                for line in proc.stdout:
-                    output.append_stdout(line)
-        finally:
-            _cleanup_process(proc)
-
-    def _handle_start(_):
-        if active_process["proc"] is not None:
-            return
-        callback = on_start or _default_start
-        _set_running_state(
-            True,
-            '<div class="demo-running-note">Please be patient. Demo is running. Use Stop Demo to interrupt it.</div>',
-        )
-        try:
-            proc = callback(selection.copy())
-        except Exception:
-            _set_running_state(False, "")
-            raise
-
-        if isinstance(proc, subprocess.Popen):
-            active_process["proc"] = proc
-            threading.Thread(
-                target=_stream_demo_output, args=(proc,), daemon=True
-            ).start()
-            return
-
-        _set_running_state(False, "")
-
-    def _handle_stop(_):
-        proc = active_process["proc"]
-        if proc is None or proc.poll() is not None:
-            return
-        running_notice.value = '<div class="demo-running-note">Stopping demo...</div>'
-        os.killpg(proc.pid, signal.SIGTERM)
-
-    start_button.on_click(_handle_start)
-    stop_button.on_click(_handle_stop)
 
     children = []
     logo_header = _logo_header()
@@ -773,7 +548,14 @@ def run_ui(on_start=None):
     container.add_class("demo-shell")
     container.add_class("demo-has-background")
     display(container)
+    display(HTML(RECORDER_HTML))
 
 
-show_demo_ui = run_ui
-show_demo_info_ui = run_info_ui
+def run_info_ui():
+    """Render the demo FAQ and available example videos."""
+    _inject_styles()
+    children = [_faq_section()]
+    container = widgets.VBox(children, layout=widgets.Layout(width="100%"))
+    container.add_class("demo-shell")
+    container.add_class("demo-stack")
+    display(container)
