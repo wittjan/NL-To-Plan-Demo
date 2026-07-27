@@ -1,6 +1,6 @@
 # Natural-Language Robot-Action-Planner Demo
 
-[![Binder](https://binder.intel4coro.de/badge_logo.svg)](https://binder.intel4coro.de/v2/gh/wittjan/Action-Planner-Demo/HEAD?urlpath=lab/workspaces/new-workspace)
+[![Binder](https://binder.intel4coro.de/badge_logo.svg)](https://binder.intel4coro.de/v2/gh/wittjan/NL-To-Plan-Demo/HEAD)
 
 This repository provides the browser interface and reproducible runtime for a natural-language robot-action-planning demo. A user selects a robot and a simulated world, records a household command, and watches the robot executing the task.
 
@@ -14,6 +14,9 @@ speech
 ```
 
 ## Start the demo
+
+> [!NOTE]
+> Local usage is preferred because the wrong LLM model is currently cached on the VRB server, preventing proper use.
 
 ### Option 1: Start the hosted Binder demo
 
@@ -34,23 +37,23 @@ When JupyterLab appears:
 
 #### CPU
 
-Start the docker from the `binder` directory:
+Start Docker from the `binder` directory:
 
 ```
 docker compose --profile cpu up --build
 ```
 
-Open `http://localhost:8888` after build.
+Open `http://localhost:8888` after the build.
 
 #### NVIDIA (experimental)
 
-Start the docker from the `binder` directory:
+Start Docker from the `binder` directory:
 
 ```
 docker compose --profile nvidia up --build
 ```
 
-It should automatically install the right dependecies with the right cuda index.
+It should automatically install the right dependencies with the right CUDA index.
 
 To use a particular compatible PyTorch CUDA wheel, set `CUDA_INDEX`, for
 example:
