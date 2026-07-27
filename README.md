@@ -15,9 +15,6 @@ speech
 
 ## Start the demo
 
-> [!NOTE]
-> Local usage is preferred because the wrong LLM model is currently cached on the VRB server, preventing proper use.
-
 ### Option 1: Start the hosted Binder demo
 
 Click the **Launch Binder** badge above. Binder builds or restores the demo image and opens the prepared JupyterLab workspace.
